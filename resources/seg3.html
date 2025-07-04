@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>图像上传 - 语义分割</title>
+  <style>
+    body {
+      font-family: "Microsoft YaHei", sans-serif;
+      background-color: #f4f4f4;
+      margin: 0;
+      padding: 0;
+    }
+
+    h1 {
+      text-align: center;
+      margin-top: 30px;
+      color: #333;
+    }
+
+    .container {
+      display: flex;
+      justify-content: center;
+      margin-top: 40px;
+      gap: 60px;
+    }
+
+    .panel {
+      background: #fff;
+      padding: 20px;
+      border-radius: 10px;
+      width: 500px;
+      box-shadow: 0 0 12px rgba(0, 0, 0, 0.15);
+      text-align: center;
+      position: relative;
+      min-height: 1200px; /* 或你希望的值，确保左右一致 */
+    }
+
+    .panel h2 {
+      margin-bottom: 20px;
+      color: #444;
+    }
+
+    #imagePreview,
+    #resultImage {
+    max-width: 100%;
+    max-height: 500px;
+    object-fit: contain;
+    border: 1px solid #ccc;
+    margin: 10px auto;
+    display: block;
+    }
+
+
+    .custom-file {
+      display: inline-block;
+      position: relative;
+      overflow: hidden;
+      margin-top: 10px;
+      margin-bottom: 10px;
+    }
+
+    .custom-file input[type="file"] {
+      position: absolute;
+      left: 0;
+      top: 0;
+      opacity: 0;
+      width: 100%;
+      height: 100%;
+      cursor: pointer;
+    }
+
+    .custom-btn {
+      padding: 10px 24px;
+      background-color: #3498db;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 15px;
+    }
+
+    .custom-btn:hover {
+      background-color: #2980b9;
+    }
+
+    #filenameDisplay {
+      font-size: 14px;
+      color: #666;
+      margin-top: 5px;
+    }
+
+    button[type="submit"],
+    #downloadBtn {
+      margin-top: 15px;
+      padding: 10px 26px;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 16px;
+    }
+
+    button[type="submit"]:hover,
+    #downloadBtn:hover {
+      background-color: #45a049;
+    }
+
+    #resultText {
+      margin-top: 15px;
+      font-size: 18px;
+      font-weight: bold;
+      color: #27ae60;
+      animation: fadeIn 1s ease-in-out;
+    }
+
+    @keyframes fadeIn {
+      0% { opacity: 0; transform: translateY(-5px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+
+    #coordDisplay {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      padding: 4px 8px;
+      background: rgba(0, 0, 0, 0.7);
+      color: white;
+      font-size: 12px;
+      border-radius: 4px;
+      display: none;
+      pointer-events: none;
+    }
+
+    #clickMarker {
+      width: 10px;
+      height: 10px;
+      background-color: red;
+      border: 2px solid white;
+      border-radius: 50%;
+      position: absolute;
+      pointer-events: none;
+      display: none;
+      z-index: 10;
+    }
+
+    .hover-pointer {
+      cursor: crosshair;
+    }
+  </style>
+</head>
+<body>
+
+<h1><SegmentAnything</h1>
+
+<div class="container">
+  <!-- 左侧上传 -->
+  <div class="panel" id="leftPanel">
+    <h2>原始图像</h2>
+    <form id="uploadForm" action="/upload" method="POST" enctype="multipart/form-data">
+      <div class="custom-file">
+        <button class="custom-btn">选择图像</button>
+        <input type="file" id="imageInput" name="image" accept="image/*" required>
+      </div>
+      <div id="filenameDisplay"></div>
+
+      <img id="imagePreview" src="#" alt="图像预览">
+      <div id="clickMarker"></div>
+      <div id="coordDisplay"></div>
+      <br>
+      <button type="submit">上传并分割</button>
+    </form>
+  </div>
+
+  <!-- 右侧分割结果 -->
+  <div class="panel">
+    <h2>分割结果</h2>
+    <img id="resultImage" src="#" alt="分割结果">
+    <div id="resultText"></div>
+    <button id="downloadBtn" style="display: none;">下载分割图像</button>
+  </div>
+</div>
+
+<script>
+  let clickedX = null;
+  let clickedY = null;
+  let currentResultURL = null;
+
+  const imageInput = document.getElementById('imageInput');
+  const imagePreview = document.getElementById('imagePreview');
+  const coordDisplay = document.getElementById('coordDisplay');
+  const clickMarker = document.getElementById('clickMarker');
+  const filenameDisplay = document.getElementById('filenameDisplay');
+
+  imageInput.addEventListener('change', function (e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    filenameDisplay.textContent = `已选择：${file.name}`;
+
+    const reader = new FileReader();
+    reader.onload = function (event) {
+      imagePreview.src = event.target.result;
+      imagePreview.style.display = 'block';
+      imagePreview.classList.add('hover-pointer');
+      clickedX = null;
+      clickedY = null;
+      clickMarker.style.display = 'none';
+      coordDisplay.style.display = 'none';
+    };
+    reader.readAsDataURL(file);
+  });
+
+  imagePreview.addEventListener('mousemove', function (event) {
+    if (clickedX !== null) return;
+    const rect = imagePreview.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    const scaleX = imagePreview.naturalWidth / imagePreview.width;
+    const scaleY = imagePreview.naturalHeight / imagePreview.height;
+    const realX = Math.round(x * scaleX);
+    const realY = Math.round(y * scaleY);
+
+    coordDisplay.style.display = 'block';
+    coordDisplay.style.left = `${x + 10}px`;
+    coordDisplay.style.top = `${y + 10}px`;
+    coordDisplay.textContent = `(${realX}, ${realY})`;
+  });
+
+  imagePreview.addEventListener('mouseleave', () => {
+    if (clickedX === null) {
+      coordDisplay.style.display = 'none';
+    }
+  });
+
+  imagePreview.addEventListener('click', function (event) {
+    const rect = imagePreview.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+
+    const scaleX = imagePreview.naturalWidth / imagePreview.width;
+    const scaleY = imagePreview.naturalHeight / imagePreview.height;
+
+    clickedX = Math.round(x * scaleX);
+    clickedY = Math.round(y * scaleY);
+
+    coordDisplay.textContent = `(${clickedX}, ${clickedY})`;
+    coordDisplay.style.left = `${x + 10}px`;
+    coordDisplay.style.top = `${y + 10}px`;
+    coordDisplay.style.display = 'block';
+
+    clickMarker.style.left = `${imagePreview.offsetLeft + x - 5}px`;
+    clickMarker.style.top = `${imagePreview.offsetTop + y - 5}px`;
+
+    clickMarker.style.display = 'block';
+  });
+
+  document.getElementById('uploadForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+
+    if (clickedX === null || clickedY === null) {
+      alert("请先点击图像选择一个点！");
+      return;
+    }
+
+    const form = e.target;
+    const formData = new FormData(form);
+    const url = `${form.action}?click=${clickedX},${clickedY}`;
+
+    fetch(url, {
+      method: 'POST',
+      body: formData
+    })
+      .then(res => res.blob())
+      .then(blob => {
+        const resultImg = document.getElementById('resultImage');
+        const url = URL.createObjectURL(blob);
+        currentResultURL = url;
+        resultImg.src = url;
+        resultImg.style.display = 'block';
+
+        document.getElementById('resultText').textContent = "分割完成";
+        document.getElementById('downloadBtn').style.display = 'inline-block';
+      })
+      .catch(err => {
+        console.error(err);
+        document.getElementById('resultText').textContent = "上传失败";
+      });
+  });
+
+  document.getElementById('downloadBtn').addEventListener('click', function () {
+    if (!currentResultURL) return;
+    const a = document.createElement('a');
+    a.href = currentResultURL;
+    a.download = 'seg_result.jpg';
+    a.click();
+  });
+</script>
+
+</body>
+</html>
